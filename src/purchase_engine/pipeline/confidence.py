@@ -10,15 +10,26 @@ we trust the inputs behind this recommendation", per product.
       + 0.25 * SalesDataSufficiency
       + 0.25 * InventoryDataReliability
       + 0.20 * ProfitabilityReliability
+      - EvidenceBreadthPenalty
 
 External-market availability is deliberately excluded: an optional signal that
 isn't built yet must not deflate confidence.
+
+The four weighted dimensions above each answer "how much do we trust *this one
+source*". They deliberately don't answer a different question: "how much of
+the Purchase Score's own evidence actually showed up for this product at all".
+A product resting on a single surviving score component (see
+``score.single_component_cap`` in ``pipeline/scoring.py``) is a materially
+weaker basis for a recommendation than one corroborated by three independent
+signals, even if every source it *does* have is individually reliable.
+``EvidenceBreadthPenalty`` makes that gap explicit rather than incidental - see
+docs/adr/0008.
 """
 
 from __future__ import annotations
 
 from purchase_engine.config import EngineConfig
-from purchase_engine.domain.models import ConfidenceBreakdown, ProductFeatures
+from purchase_engine.domain.models import ConfidenceBreakdown, ProductFeatures, ScoreBreakdown
 
 _UNIQUE_KEYS = {"EINDEUTIGER_MODELLSCHLUESSEL"}
 _ALIAS_KEYS = {"ALIAS"}
@@ -79,25 +90,44 @@ class ConfidenceScorer:
         pts = self.cfg.confidence.profitability_status_points
         return float(pts.get(f.profitability.status, 0.0))
 
-    def score(self, f: ProductFeatures) -> ConfidenceBreakdown:
+    def _evidence_breadth_penalty(self, score: ScoreBreakdown) -> tuple[int, float]:
+        """How many of the Purchase Score's 3 "real" components had data, and
+        the points to dock for that. Market is excluded - it's UNAVAILABLE for
+        every product in the MVP by design, not evidence about this one."""
+        present = sum(x is not None for x in (score.demand, score.inventory_need, score.profit))
+        c = self.cfg.confidence
+        penalty = {
+            0: c.evidence_breadth_one_component_penalty,  # degenerate: score itself is 0
+            1: c.evidence_breadth_one_component_penalty,
+            2: c.evidence_breadth_two_components_penalty,
+        }.get(present, 0.0)
+        return present, penalty
+
+    def score(self, f: ProductFeatures, score: ScoreBreakdown) -> ConfidenceBreakdown:
         w = self.cfg.confidence.weights
         m = self._mapping(f)
         s = self._sales_sufficiency(f)
         i = self._inventory_reliability(f)
         p = self._profitability_reliability(f)
+        present, penalty = self._evidence_breadth_penalty(score)
         conf = (
             w["mapping"] * m
             + w["sales_sufficiency"] * s
             + w["inventory_reliability"] * i
             + w["profitability_reliability"] * p
+            - penalty
         )
         return ConfidenceBreakdown(
             mapping=round(m, 1),
             sales_sufficiency=round(s, 1),
             inventory_reliability=round(i, 1),
             profitability_reliability=round(p, 1),
+            evidence_components_present=present,
+            evidence_penalty=round(penalty, 1),
             confidence=round(max(0.0, min(100.0, conf))),
         )
 
-    def score_all(self, features: list[ProductFeatures]) -> dict[str, ConfidenceBreakdown]:
-        return {f.produkt_id: self.score(f) for f in features}
+    def score_all(
+        self, features: list[ProductFeatures], scores: dict[str, ScoreBreakdown]
+    ) -> dict[str, ConfidenceBreakdown]:
+        return {f.produkt_id: self.score(f, scores[f.produkt_id]) for f in features}

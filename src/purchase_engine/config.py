@@ -41,6 +41,11 @@ class ConfidenceConfig:
     recency_points: float
     recent_days: float
     stale_days: float
+    # How many points to dock when the Purchase Score itself only had 1 or 2
+    # of its 3 "real" components (demand / inventory need / profit) to work
+    # with - see docs/adr/0008.
+    evidence_breadth_one_component_penalty: float
+    evidence_breadth_two_components_penalty: float
 
 
 @dataclass(frozen=True)
@@ -133,6 +138,15 @@ def _validate(cfg: EngineConfig) -> EngineConfig:
         raise ConfigError("config: quantity.per_sku_max_exposure must be > 0")
     if cfg.velocity.fast_switch_units < 1:
         raise ConfigError("config: velocity.fast_switch_units must be >= 1")
+    one_pen = cfg.confidence.evidence_breadth_one_component_penalty
+    two_pen = cfg.confidence.evidence_breadth_two_components_penalty
+    if one_pen < 0 or two_pen < 0:
+        raise ConfigError("config: confidence.evidence_breadth_penalty values must be >= 0")
+    if one_pen < two_pen:
+        raise ConfigError(
+            "config: evidence_breadth_penalty.one_component must be >= two_components "
+            "(less evidence should never be penalised less)"
+        )
     if cfg.incoming.source not in {"ek_normalisiert", "live_purchase_table"}:
         msg = f"config: incoming.source {cfg.incoming.source!r} not supported"
         raise ConfigError(msg)
@@ -198,6 +212,12 @@ def load_config(path: str | Path | None = None) -> EngineConfig:
             recency_points=float(ss.get("recency_points", 30)),
             recent_days=float(ss.get("recent_days", 14)),
             stale_days=float(ss.get("stale_days", 180)),
+            evidence_breadth_one_component_penalty=float(
+                conf.get("evidence_breadth_penalty", {}).get("one_component", 15)
+            ),
+            evidence_breadth_two_components_penalty=float(
+                conf.get("evidence_breadth_penalty", {}).get("two_components", 5)
+            ),
         ),
         velocity=VelocityConfig(
             fast_window_days=int(vel.get("fast_window_days", 30)),

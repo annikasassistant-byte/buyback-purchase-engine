@@ -158,3 +158,10 @@ class ExplanationGenerator:
                 "Score rests on a single surviving component - capped at "
                 f"{self.cfg.score.single_component_cap:.0f} rather than shown as a bare 100."
             )
+        if conf.evidence_penalty > 0:
+            risk.append(
+                f"Only {conf.evidence_components_present} of 3 score signals (demand / "
+                f"stock-need / profit) had data for this product - confidence docked "
+                f"{conf.evidence_penalty:.0f} points for thin evidence, on top of the "
+                f"per-source checks above."
+            )

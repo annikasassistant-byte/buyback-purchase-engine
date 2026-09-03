@@ -48,8 +48,10 @@ anything.
    - Resolves `as_of` (config, else latest sale date).
    - Builds the incoming-stock source and `TrailingWindowProfitability`.
    - `FeatureBuilder.build(as_of)` → one `ProductFeatures` per active product.
-   - `PurchaseScorer.score_all` and `ConfidenceScorer.score_all` run **side by
-     side** (never multiplied).
+   - `PurchaseScorer.score_all`, then `ConfidenceScorer.score_all(features,
+     scores)` - Confidence reads *which* score components had data (evidence
+     breadth, ADR 0008), never the score's *value*. Still never multiplied or
+     combined into one number.
    - `QuantityPlanner.plan_all` → order-up-to-level quantities.
    - Labels assigned from score thresholds (BUY / CONSIDER / SKIP).
    - `BudgetAllocator.allocate` rations the BUY tier by expected GP per euro.

@@ -91,7 +91,7 @@ src/purchase_engine/
 └── config/engine.yml shipped default config
 
 tests/   unit/  property/  golden/
-docs/    architecture.md  adr/0001..0007
+docs/    architecture.md  adr/0001..0008
 ```
 
 Imports point inward only: `domain ← adapters ← pipeline ← cli`. See
@@ -112,12 +112,13 @@ FeatureBuilder ─────────────────────�
    days-of-supply · availability badge · mapping quality · merge redirect
    profitability  ← port: TrailingWindowProfitability
    ▼
-PurchaseScorer            ConfidenceScorer            QuantityPlanner
+PurchaseScorer ──────────▶ ConfidenceScorer            QuantityPlanner
    0–100                     0–100 %                     order-up-to-level
    demand/stock/profit/      mapping/sales/inventory/    ceil(v·T − effective)
-   market (redistributed)    profit reliability          capped per SKU
-        └──────── never multiplied ────────┘                  │
-                                                       BudgetAllocator (greedy GP/€)
+   market (redistributed)    profit + evidence breadth   capped per SKU
+        └──────── never multiplied or combined ─┘                  │
+        (Confidence reads which score components had data,   BudgetAllocator
+         never the score's value - see ADR 0008)              (greedy GP/€)
    ▼
 ExplanationGenerator  → reasons[] + risks[]  (always together)
    ▼
@@ -149,11 +150,22 @@ PurchaseScore = W_demand·Demand + W_inventory·InventoryNeed + W_profit·Profit
 
 ```
 Confidence = 0.30·Mapping + 0.25·SalesSufficiency + 0.25·InventoryReliability + 0.20·ProfitabilityReliability
+           − EvidenceBreadthPenalty
 ```
 
 alias / unique-key → 100 · category+model fallback → 70 · active/active
 duplicate → 40. `InventoryReliability` is 100 if the SKU joins to
 `Inventar_Bestand`, else 0 (stock then = *unknown*, **never zero**).
+
+* **`EvidenceBreadthPenalty`** ([ADR&nbsp;0008](docs/adr/0008-confidence-reflects-purchase-score-evidence-breadth.md)):
+  the four dimensions above each measure "how much do I trust *this one
+  source*" — none of them measured "how many of the Purchase Score's own
+  components actually had data for this product" until now. A product resting
+  on a single surviving score component (the single-component-cap case above)
+  docks Confidence by `confidence.evidence_breadth_penalty.one_component`
+  (default 15); two of three present docks `...two_components` (default 5);
+  all three → no penalty. Market is excluded from the count on purpose — it's
+  `UNAVAILABLE` for every product in the MVP, not evidence about this one.
 
 ### Quantity — periodic-review order-up-to-level
 

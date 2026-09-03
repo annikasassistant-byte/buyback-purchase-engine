@@ -131,6 +131,8 @@ class ConfidenceBreakdown:
     sales_sufficiency: float
     inventory_reliability: float
     profitability_reliability: float
+    evidence_components_present: int  # 0..3 - how many of demand/inv_need/profit had data
+    evidence_penalty: float  # points docked for thin evidence breadth (see ADR 0008)
     confidence: int  # 0..100
 
 

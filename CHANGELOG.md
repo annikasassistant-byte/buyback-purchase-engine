@@ -16,12 +16,29 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `find_default_workbook()` / `DEFAULT_WORKBOOK_GLOB` centralised in
   `adapters/workbook.py` (previously duplicated in the CLI and the golden
   test); added `tests/unit/test_workbook.py`.
+- **Confidence Score evidence-breadth penalty** — see
+  [ADR&nbsp;0008](docs/adr/0008-confidence-reflects-purchase-score-evidence-breadth.md).
+  A product whose Purchase Score rests on only 1 or 2 of its 3 "real"
+  components (demand / inventory need / profit) now has Confidence docked
+  explicitly for that (`confidence.evidence_breadth_penalty` in
+  `config/engine.yml`, default 15 / 5 points), surfaced as a named risk line.
+  Closes a gap between ADR 0003's stated intent ("that same uncertainty does
+  lower the Confidence Score") and what the code actually did: the
+  single-component-cap case could previously still read as moderately
+  confident if its mapping and inventory-join happened to be clean.
+  `ConfidenceBreakdown` gains `evidence_components_present` and
+  `evidence_penalty`; `ConfidenceScorer.score()` now also takes the product's
+  `ScoreBreakdown`.
 
 ### Changed
 
 - `.gitignore` now allow-lists exactly that one file under `data/raw/` —
   everything else dropped there (fresh exports, the live purchase table)
   stays ignored by default.
+- Regenerated the golden fixture for the evidence-breadth penalty above.
+  All 374 Purchase Scores and BUY/CONSIDER/SKIP labels are unchanged (this
+  only touches Confidence); 193 of 374 products' Confidence dropped, by at
+  most 15 points.
 
 ## [0.2.0] - 2026-09-03
 

@@ -9,7 +9,7 @@ from tests._factories import mkfeat
 
 def _explain(cfg, f):
     sb = PurchaseScorer(cfg).score_all([f])[f.produkt_id]
-    cb = ConfidenceScorer(cfg).score(f)
+    cb = ConfidenceScorer(cfg).score(f, sb)
     qp = QuantityPlanner(cfg).plan(f)
     return ExplanationGenerator(cfg).generate(f, sb, cb, qp)
 
@@ -39,6 +39,15 @@ def test_unknown_stock_is_flagged_not_treated_as_zero(cfg):
 def test_fallback_mapping_is_surfaced_as_the_confidence_lever(cfg):
     _, risk = _explain(cfg, mkfeat("BB1", mquelle="KATEGORIE_UND_MODELLSCHLUESSEL"))
     assert any("category+model fallback" in r for r in risk)
+
+
+def test_thin_evidence_is_surfaced_as_a_confidence_risk(cfg):
+    # zero sales -> demand AND inventory-need both drop out of the Purchase
+    # Score; only profit survives. Confidence should name that as an explicit
+    # reason, not just a quietly lower number.
+    f = mkfeat("BB1", vel=None, win=0, u30=0, u90=0, dss=None, margin=80.0, ok_rows=9)
+    _, risk = _explain(cfg, f)
+    assert any("score signals" in r and "thin evidence" in r for r in risk)
 
 
 def test_explanations_are_capped_at_five_lines_each(cfg):

@@ -106,7 +106,7 @@ class Engine:
         feat_by_pid = {f.produkt_id: f for f in features}
 
         scores = PurchaseScorer(self.cfg).score_all(features)
-        confs = ConfidenceScorer(self.cfg).score_all(features)
+        confs = ConfidenceScorer(self.cfg).score_all(features, scores)
         plans = QuantityPlanner(self.cfg).plan_all(features)
 
         buy_min = self.cfg.score.buy_min

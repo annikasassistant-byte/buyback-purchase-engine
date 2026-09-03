@@ -12,7 +12,12 @@ from typing import Any
 
 import pandas as pd
 
-from purchase_engine.domain.models import ParserTables, ProductFeatures, ProductProfitability
+from purchase_engine.domain.models import (
+    ParserTables,
+    ProductFeatures,
+    ProductProfitability,
+    ScoreBreakdown,
+)
 
 AS_OF = datetime(2026, 8, 24)
 
@@ -244,4 +249,28 @@ def mkfeat(
         margin_pct=margin,
         hist_success=hist,
         ok_rows=ok_rows,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# ScoreBreakdown - a lightweight double, so confidence tests can be pure unit #
+# tests instead of always routing through PurchaseScorer first.              #
+# --------------------------------------------------------------------------- #
+def mkscore(
+    *,
+    demand: float | None = 80.0,
+    inventory_need: float | None = 80.0,
+    profit: float | None = 80.0,
+    market: float | None = None,
+    score: int = 80,
+) -> ScoreBreakdown:
+    return ScoreBreakdown(
+        demand=demand,
+        inventory_need=inventory_need,
+        profit=profit,
+        market=market,
+        overstock_penalty=0.0,
+        effective_weights={},
+        single_component_capped=False,
+        score=score,
     )

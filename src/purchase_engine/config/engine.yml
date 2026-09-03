@@ -68,6 +68,18 @@ confidence:
     TEMP_CALCULATED: 60
     "PRÜFEN": 30
     UNAVAILABLE: 0
+  # Purchase Score rests on up to 3 "real" components (demand, inventory need,
+  # profit - market is excluded: it's UNAVAILABLE for every product in the MVP
+  # by design, not evidence about this specific one). When fewer of them
+  # actually had data for a product, that IS a distinct reliability signal on
+  # its own - not just "how good is each source we happen to have" (the four
+  # dimensions above) but "how much evidence corroborates this score at all"
+  # (see docs/adr/0008). Subtracted from the weighted blend above, same
+  # pattern as score.overstock_penalty.
+  evidence_breadth_penalty:
+    one_component: 15   # only 1 of 3 present - the single_component_cap case
+    two_components: 5   # 2 of 3 present
+    three_components: 0 # all 3 present - no penalty
 
 velocity:
   fast_window_days: 30

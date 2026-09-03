@@ -33,8 +33,11 @@ inward. See [`docs/architecture.md`](docs/architecture.md).
 
 - **Read-only on the parser.** The engine never re-parses a product name and
   never writes back to the parser's sheets. All new logic lives here.
-- **Score and Confidence are never multiplied.** They answer different
-  questions and are reported side by side.
+- **Score and Confidence are never multiplied or combined into one number.**
+  They answer different questions and are reported side by side. Confidence
+  *is* allowed to read which Purchase Score components had data for a product
+  (ADR 0008) - that's still two separate numbers, not one derived from the
+  other's value.
 - **Missing score components are redistributed, never zero-filled.** Uncertainty
   belongs in the Confidence Score, never as a Purchase Score penalty.
 - **Business knobs live in `config/engine.yml`**, not in code. If you find
