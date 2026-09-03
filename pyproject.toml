@@ -110,7 +110,13 @@ ban-relative-imports = "parents"
 # mypy - static typing
 # =============================================================================
 [tool.mypy]
-python_version = "3.11"
+# No pinned python_version on purpose: CI runs mypy under 3.11, 3.12 and 3.13
+# in turn (see .github/workflows/ci.yml), each with its own installed numpy /
+# pandas-stubs. Left unset, mypy checks against the interpreter actually
+# running it, matching each job. Pinning this to 3.11 broke the 3.12/3.13 jobs:
+# newer numpy releases ship .pyi stubs using PEP 695 `type` statements, which
+# mypy's parser rejects outright when told to target 3.11 grammar - a hard
+# syntax error in a third-party stub, unrelated to our own code.
 files = ["src", "tests"]
 namespace_packages = true
 explicit_package_bases = true
