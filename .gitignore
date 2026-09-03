@@ -1,0 +1,31 @@
+# run outputs - the append-only recommendation history lives here
+/artifacts/*
+!/artifacts/.gitkeep
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# environments
+.venv/
+venv/
+.env
+
+# editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

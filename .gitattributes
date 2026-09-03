@@ -1,0 +1,15 @@
+# Normalise line endings
+* text=auto eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+
+# Binary / vendored - don't diff, don't touch
+*.xlsx binary
+*.png binary
+*.ico binary
+
+# Generated fixture - keep out of language stats / review noise
+tests/golden/data/summary.json linguist-generated=true

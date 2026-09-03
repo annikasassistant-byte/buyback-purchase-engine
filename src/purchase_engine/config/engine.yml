@@ -1,0 +1,107 @@
+# =============================================================================
+# BuyBack Purchase Engine - MVP configuration
+#
+# Everything the business is expected to tune lives here, NOT in code. This file
+# mirrors the future `Purchase_Engine_Config` Google Sheet tab described in the
+# Technical Implementation Plan (§Technical architecture). Every run reads and
+# validates it; an invalid file is rejected and the caller keeps the last-good
+# config (see engine/config.py).
+#
+# Weights are given as points (they do not need to sum to 100 - they are
+# normalised over whichever components have data on a given run).
+# =============================================================================
+
+data:
+  # as_of: the date the engine treats as "today" for every trailing window.
+  # null  -> use the latest Auftragsdatum present in Tagesprofite (data-driven).
+  # Set a YYYY-MM-DD string to pin it (e.g. for backtests / reproducing a run).
+  as_of: null
+  # Warn (STALE_INPUTS) when the newest sale is older than this many days
+  # relative to the real calendar date the run happens on.
+  stale_after_days: 3
+
+score:
+  weights:
+    demand: 35            # W_demand     - sales velocity, category percentile
+    inventory_need: 30    # W_inventory  - days-of-supply gap vs target cover
+    profit: 25            # W_profit     - trailing margin percentile + hist. success
+    market: 10            # W_market     - external demand (Keepa/Back Market); UNAVAILABLE for MVP -> redistributed
+  # Guard from the plan's "Canon 18-55mm" note: a score built from a single
+  # surviving component is misleading. Cap it here (null disables the cap).
+  single_component_cap: 70
+  overstock_penalty:
+    # Trigger only well past the coverage target AND on a genuine slow mover.
+    supply_multiple: 3        # days_of_supply > supply_multiple * target_coverage_days
+    min_days_since_sale: 60
+    max_points: 20
+  labels:
+    buy_min: 65
+    consider_min: 40
+
+profit_score:
+  margin_weight: 0.70
+  hist_success_weight: 0.30
+
+confidence:
+  weights:
+    mapping: 0.30
+    sales_sufficiency: 0.25
+    inventory_reliability: 0.25
+    profitability_reliability: 0.20
+  mapping_points:
+    alias: 100                 # ALIAS
+    unique_key: 100            # EINDEUTIGER_MODELLSCHLUESSEL
+    override: 90               # ARTIKELNUMMER_OVERRIDE_*
+    fallback: 70               # KATEGORIE_UND_MODELLSCHLUESSEL
+    reweighted_no_match: 60    # NEUBEWERTUNG_OHNE_EINDEUTIGEN_TREFFER
+    unknown: 50
+    duplicate: 40              # active/active Produktstamm duplicate - overrides the above
+  sales_sufficiency:
+    units_target: 10           # units_90d that earns the full unit-count points
+    units_points: 70
+    recency_points: 30
+    recent_days: 14            # last sale within this many days -> full recency points
+    stale_days: 180            # last sale older than this -> zero recency points
+  # Maps ProductProfitability.status -> points.
+  profitability_status_points:
+    CONFIRMED: 100
+    TEMP_CALCULATED: 60
+    "PRÜFEN": 30
+    UNAVAILABLE: 0
+
+velocity:
+  fast_window_days: 30
+  slow_window_days: 90
+  fast_switch_units: 3         # >= this many units in the fast window -> use the 30d rate
+
+quantity:
+  target_coverage_days: 14     # lead time (2-7d, confirmed) + safety buffer
+  lead_time_days: [2, 7]       # informational for now; feeds a real safety-stock term later
+  per_sku_max_exposure: 8      # PerSkuMaxExposure default - one spike can't eat the budget
+  per_category_max_exposure: {}  # e.g. {PS5: 4, "Handys + Tablets": 10}
+
+budget:
+  # Greedy allocation ranks the BUY list by expected gross profit per euro of EK
+  # and fills top-down, trimming the marginal product. null -> no cap (take all).
+  daily_budget_eur: null
+  rank_low_confidence_normally: true   # allocator ranks on GP/EUR only; low confidence stays visible, not down-ranked
+
+profitability:
+  # TrailingWindowProfitability - reproduces the parser's trusted EK method
+  # ("average of the last N purchases within M days") plus a trailing-window
+  # median margin on Status=OK sales rows.
+  ek_lookback_days: 60
+  ek_max_purchases: 3
+  margin_window_days: 90
+  min_ok_rows_confirmed: 5     # >= -> status CONFIRMED
+  min_ok_rows_temp: 1          # >= -> status TEMP_CALCULATED ; 0 -> UNAVAILABLE
+  ek_sanity_max_eur: 5000      # ignore EK_Normalisiert rows above this (postal-code-as-price outliers etc.)
+
+incoming:
+  # Source of "already bought, not yet sellable" units, added to Effective Stock.
+  #   ek_normalisiert       -> proxy from EK_Normalisiert.Kaufdatum (MVP default; only the profit workbook needed)
+  #   live_purchase_table   -> reserved for the hand-entered Google Sheet once wired in (see engine/incoming.py)
+  source: ek_normalisiert
+  purchased_today_days: 0      # Kaufdatum == as_of
+  older_incoming_window: [1, 10]  # Kaufdatum within as_of-10 .. as_of-1
+  ek_status_filter: AUTOMATISCH_VERWENDBAR   # null -> no status filter
