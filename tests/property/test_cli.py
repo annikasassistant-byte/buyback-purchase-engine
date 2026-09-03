@@ -53,7 +53,7 @@ def fake_engine(monkeypatch, tmp_path):
             return res
 
     monkeypatch.setattr(cli, "Engine", _FakeEngine)
-    monkeypatch.setattr(cli, "_find_default_workbook", lambda: tmp_path / "wb.xlsx")
+    monkeypatch.setattr(cli, "find_default_workbook", lambda: tmp_path / "wb.xlsx")
     return calls
 
 
@@ -75,12 +75,12 @@ def test_cli_json_mode(fake_engine, capsys):
 
 
 def test_cli_returns_2_when_no_workbook(monkeypatch, capsys):
-    monkeypatch.setattr(cli, "_find_default_workbook", lambda: None)
+    monkeypatch.setattr(cli, "find_default_workbook", lambda: None)
     assert cli.main(["--no-store"]) == 2
 
 
 def test_cli_maps_engine_error_to_exit_1(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "_find_default_workbook", lambda: tmp_path / "wb.xlsx")
+    monkeypatch.setattr(cli, "find_default_workbook", lambda: tmp_path / "wb.xlsx")
 
     class _Boom:
         def __init__(self, *a, **k): ...
@@ -89,7 +89,3 @@ def test_cli_maps_engine_error_to_exit_1(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli, "Engine", _Boom)
     assert cli.main(["--no-store"]) == 1
-
-
-def test_find_default_workbook_returns_none_when_absent(tmp_path):
-    assert cli._find_default_workbook(tmp_path) is None

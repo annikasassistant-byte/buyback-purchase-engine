@@ -6,6 +6,23 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Checked the interim sample dataset (`BuyBack - Profit (Aktualisiert
+  2026-09-02).xlsx`) into the repository under
+  `data/raw/full_dataset_2026_run/` as a versioned fixture — see
+  [ADR&nbsp;0007](docs/adr/0007-ship-the-interim-sample-dataset.md). A fresh
+  clone can now run the engine and the golden test with no manual setup.
+- `find_default_workbook()` / `DEFAULT_WORKBOOK_GLOB` centralised in
+  `adapters/workbook.py` (previously duplicated in the CLI and the golden
+  test); added `tests/unit/test_workbook.py`.
+
+### Changed
+
+- `.gitignore` now allow-lists exactly that one file under `data/raw/` —
+  everything else dropped there (fresh exports, the live purchase table)
+  stays ignored by default.
+
 ## [0.2.0] - 2026-09-03
 
 Phase 2 MVP.

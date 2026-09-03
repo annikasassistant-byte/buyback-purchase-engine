@@ -5,8 +5,14 @@ default config, then diffs a *stable* summary (counts + the per-product scoring
 outputs; volatile fields like ``run_id`` / timestamps stripped) against
 ``tests/golden/data/summary.json``.
 
-The workbook is not in this repo - the test skips when it cannot be found by
-searching upward from the working directory. CI runs ``pytest -m "not golden"``.
+The workbook is the interim sample dataset checked into the repo under
+``data/raw/...`` (see docs/adr/0007) - a real export, carrying real
+private-seller PII, deliberately tracked as a reviewed fixture. The test still
+skips if it can't find the file (e.g. a checkout that hasn't pulled it, or
+before it's ever pushed anywhere). CI additionally runs
+``pytest -m "not golden"`` as a belt-and-braces exclusion, independent of
+whether the file happens to be present - CI is not a place this data should
+run, regardless of what's checked out.
 
 Regenerate after an intentional change::
 
@@ -22,28 +28,19 @@ from pathlib import Path
 
 import pytest
 
+from purchase_engine.adapters.workbook import find_default_workbook
 from purchase_engine.config import load_config
 from purchase_engine.pipeline.orchestrator import Engine
 
-_GLOB = "data/raw/full_dataset_2026_run/BuyBack - Profit*.xlsx"
 _GOLDEN = Path(__file__).resolve().parent / "data" / "summary.json"
 _AS_OF = datetime(2026, 8, 24)
 
 pytestmark = pytest.mark.golden
 
 
-def _find_workbook() -> Path | None:
-    here = Path.cwd().resolve()
-    for base in (here, *here.parents):
-        hits = sorted(base.glob(_GLOB))
-        if hits:
-            return hits[-1]
-    return None
-
-
 def _summary() -> dict:
     cfg = load_config()
-    result = Engine(cfg).run(_find_workbook(), as_of=_AS_OF, budget_eur=1500.0)
+    result = Engine(cfg).run(find_default_workbook(), as_of=_AS_OF, budget_eur=1500.0)
     rows = [
         {
             "produkt_id": r.produkt_id,
@@ -62,7 +59,7 @@ def _summary() -> dict:
     return {"config_hash": cfg.hash, "counts": result.counts, "rows": rows}
 
 
-@pytest.mark.skipif(_find_workbook() is None, reason="real workbook not found")
+@pytest.mark.skipif(find_default_workbook() is None, reason="real workbook not found")
 def test_golden_matches():
     current = _summary()
     if os.environ.get("PE_WRITE_GOLDEN"):

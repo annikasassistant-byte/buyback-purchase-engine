@@ -2,6 +2,18 @@
 /artifacts/*
 !/artifacts/.gitkeep
 
+# data/raw/ - ignored by default (fresh exports, the live purchase table,
+# anything someone drops here day to day). ONE file is deliberately allow-
+# listed below: the interim sample dataset the engine runs against until a
+# live JTL API / Google Sheets connection exists - see docs/adr/0007. It
+# carries real private-seller data (name, postal code) and purchase prices;
+# it is tracked as a reviewed, versioned fixture on purpose, not a general
+# "data is fine to commit" policy - nothing else in this directory is.
+/data/raw/*
+!/data/raw/full_dataset_2026_run/
+/data/raw/full_dataset_2026_run/*
+!/data/raw/full_dataset_2026_run/BuyBack - Profit (Aktualisiert 2026-09-02).xlsx
+
 # python
 __pycache__/
 *.py[cod]

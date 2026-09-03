@@ -19,6 +19,7 @@ from pathlib import Path
 
 from purchase_engine import __version__
 from purchase_engine.adapters.store import FileStore, MultiStore, SqliteStore
+from purchase_engine.adapters.workbook import DEFAULT_WORKBOOK_GLOB, find_default_workbook
 from purchase_engine.config import load_config
 from purchase_engine.domain.models import Recommendation, RecommendationSet, to_jsonable
 from purchase_engine.errors import PurchaseEngineError
@@ -26,17 +27,6 @@ from purchase_engine.logconfig import configure_logging
 from purchase_engine.pipeline.orchestrator import Engine
 
 log = logging.getLogger(__name__)
-
-_WORKBOOK_GLOB = "data/raw/full_dataset_2026_run/BuyBack - Profit*.xlsx"
-
-
-def _find_default_workbook(start: Path | None = None) -> Path | None:
-    here = (start or Path.cwd()).resolve()
-    for base in (here, *here.parents):
-        hits = sorted(base.glob(_WORKBOOK_GLOB))
-        if hits:
-            return hits[-1]
-    return None
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -122,9 +112,9 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     configure_logging(args.verbose)
 
-    workbook = args.workbook or _find_default_workbook()
+    workbook = args.workbook or find_default_workbook()
     if workbook is None:
-        log.error("no --workbook given and none found under CWD (%s)", _WORKBOOK_GLOB)
+        log.error("no --workbook given and none found under CWD (%s)", DEFAULT_WORKBOOK_GLOB)
         return 2
 
     try:

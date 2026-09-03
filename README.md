@@ -29,10 +29,22 @@ python -m purchase_engine --budget 1500              # run against an auto-disco
 `uv` works too: `uv sync --extra dev`.
 
 The one input the MVP needs is the **`BuyBack - Profit` xlsx** (the parser's
-offline export). By default the CLI searches upward from the working directory
-for `data/raw/full_dataset_2026_run/BuyBack - Profit*.xlsx`; pass `--workbook`
-to point at it explicitly. The Phase-1 inventory join is already baked into that
-workbook as the `Inventar_Bestand` tab.
+offline export). It ships inside this repo, checked in as an **interim sample
+dataset**, at `data/raw/full_dataset_2026_run/BuyBack - Profit (Aktualisiert
+2026-09-02).xlsx` — a fresh clone already has it, no setup step needed. By
+default the CLI searches upward from the working directory for that path, so
+running from the repo root (or anywhere under it) just finds it; pass
+`--workbook` to point at a different export instead. The Phase-1 inventory join
+is already baked into that workbook as the `Inventar_Bestand` tab.
+
+It's checked in *only* because there is no live connection yet (no Sheets API,
+no JTL API — see "Out of scope" above); it's the one and only data source the
+MVP has, not a general "data is fine to commit" policy. It carries real
+private-seller data (name, postal code) and purchase prices, so `.gitignore`
+allow-lists **only this exact file** — everything else dropped into `data/raw/`
+(a fresh daily export, the live purchase table) stays ignored by default. See
+[ADR&nbsp;0007](docs/adr/0007-ship-the-interim-sample-dataset.md) for the full
+reasoning, including when this should be revisited.
 
 ```bash
 python -m purchase_engine --workbook "/path/to/BuyBack - Profit ....xlsx" \
@@ -79,7 +91,7 @@ src/purchase_engine/
 └── config/engine.yml shipped default config
 
 tests/   unit/  property/  golden/
-docs/    architecture.md  adr/0001..0006
+docs/    architecture.md  adr/0001..0007
 ```
 
 Imports point inward only: `domain ← adapters ← pipeline ← cli`. See
@@ -186,8 +198,12 @@ and asserted by the golden test.
 | Regenerate golden | `make golden` |
 
 CI (`.github/workflows/ci.yml`) runs Ruff, `ruff format --check`, mypy and the
-test suite on Python 3.11 / 3.12 / 3.13. The golden test (`-m golden`) needs the
-real workbook and is skipped in CI.
+test suite on Python 3.11 / 3.12 / 3.13. The golden test (`-m golden`) is
+explicitly excluded there (`-m "not golden"`) — CI checks out whatever has been
+pushed to the remote, and this repository's sample dataset going in is a
+separate decision from it being pushed (see
+[ADR&nbsp;0007](docs/adr/0007-ship-the-interim-sample-dataset.md)). Locally,
+with the sample dataset present, `make test` runs it like any other test.
 
 Toolchain: **Ruff** (lint + format), **mypy** (types), **pytest** +
 **pytest-cov**, **pre-commit**, **hatchling** build backend, `src/` layout — the

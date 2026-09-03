@@ -52,6 +52,26 @@ gets an ADR in [`docs/adr/`](docs/adr/) (copy `0001` as the template) and a
 make golden      # PE_WRITE_GOLDEN=1 pytest tests/golden --no-cov -q
 ```
 
+## Data
+
+The engine's only input, `data/raw/full_dataset_2026_run/BuyBack - Profit
+(Aktualisiert 2026-09-02).xlsx`, is checked into the repo as an interim sample
+fixture — see [ADR&nbsp;0007](docs/adr/0007-ship-the-interim-sample-dataset.md)
+for why. It carries real private-seller data, so it's the **only** thing
+`.gitignore` allow-lists under `data/raw/` — anything else you drop in there
+(a fresher export, the live purchase table, a JTL CSV) stays ignored by
+default; don't widen that allow-list without re-reading the ADR first.
+
+Replacing it with a newer export: delete the old file and add the new one in
+the same commit (never both), update the filename everywhere it's still
+literal (`DEFAULT_WORKBOOK_GLOB` in `adapters/workbook.py` is a glob so it
+doesn't need touching; the golden test docstring and this file's date do), and
+regenerate the golden fixture in that commit.
+
+Whether and when this repository's history — which now contains that PII — is
+pushed anywhere, or who gets access to the remote, is a decision to make
+deliberately each time, not an assumption to carry forward from the last time.
+
 ## Style
 
 Ruff owns formatting and import order - don't hand-format. Type every function

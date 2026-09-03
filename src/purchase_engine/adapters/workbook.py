@@ -20,6 +20,30 @@ from purchase_engine.errors import DataSourceError
 
 log = logging.getLogger(__name__)
 
+# Where the default workbook lives, relative to the repo root: the interim
+# sample dataset checked into the repo (see docs/adr/0007 - it's the one file
+# under data/raw/ that .gitignore deliberately allow-lists; it carries real
+# private-seller PII, tracked on purpose as a reviewed fixture). The CLI and
+# the golden test both resolve it through `find_default_workbook` below, so
+# this glob is defined exactly once.
+DEFAULT_WORKBOOK_GLOB = "data/raw/full_dataset_2026_run/BuyBack - Profit*.xlsx"
+
+
+def find_default_workbook(start: Path | None = None) -> Path | None:
+    """Search upward from `start` (default: CWD) for the default workbook.
+
+    Checks `start`, then each parent directory, for anything matching
+    `DEFAULT_WORKBOOK_GLOB`. Returns the lexicographically-last match in the
+    first directory that has one (a dated filename sorts newest-last), or
+    None if no directory up to the filesystem root has a match.
+    """
+    here = (start or Path.cwd()).resolve()
+    for base in (here, *here.parents):
+        hits = sorted(base.glob(DEFAULT_WORKBOOK_GLOB))
+        if hits:
+            return hits[-1]
+    return None
+
 
 class ParserWorkbook:
     """Load and canonicalise the parser-output tabs the engine needs."""
