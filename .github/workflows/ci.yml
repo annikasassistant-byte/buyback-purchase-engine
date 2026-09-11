@@ -42,7 +42,14 @@ jobs:
         run: mypy
 
       - name: Tests
-        # The golden test needs the real workbook, which is not in this repo.
+        # `tests/golden` pins exact scores against the checked-in workbook and
+        # is deliberately slow - kept out of the fast path (ADR 0007), not
+        # because the data isn't here. `tests/api` and the Postgres-backed
+        # unit tests need DATABASE_URL - set as repo secrets (a Neon
+        # database dedicated to CI); they skip cleanly if it's ever absent.
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_URL_POOLED: ${{ secrets.DATABASE_URL_POOLED }}
         run: pytest -m "not golden" --cov-report=xml
 
       - name: Upload coverage

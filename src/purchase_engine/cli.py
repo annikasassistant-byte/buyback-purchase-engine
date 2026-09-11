@@ -18,7 +18,13 @@ from datetime import datetime
 from pathlib import Path
 
 from purchase_engine import __version__
-from purchase_engine.adapters.store import FileStore, MultiStore, SqliteStore
+from purchase_engine.adapters.store import (
+    FileStore,
+    MultiStore,
+    PostgresStore,
+    SqliteStore,
+    dsn_from_env,
+)
 from purchase_engine.adapters.workbook import DEFAULT_WORKBOOK_GLOB, find_default_workbook
 from purchase_engine.config import load_config
 from purchase_engine.domain.models import Recommendation, RecommendationSet, to_jsonable
@@ -55,6 +61,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--sqlite", action="store_true", help="also mirror into artifacts/history.sqlite"
+    )
+    p.add_argument(
+        "--postgres",
+        action="store_true",
+        help="also mirror into Postgres/Neon (needs DATABASE_URL - see .env.example)",
     )
     p.add_argument("--no-store", action="store_true", help="do not persist this run")
     p.add_argument("--limit", type=int, default=25, help="rows to print for BUY/CONSIDER")
@@ -124,6 +135,15 @@ def main(argv: list[str] | None = None) -> int:
             stores: list[object] = [FileStore(args.artifacts)]
             if args.sqlite:
                 stores.append(SqliteStore(Path(args.artifacts) / "history.sqlite"))
+            if args.postgres:
+                dsn = dsn_from_env()
+                if dsn is None:
+                    log.error(
+                        "--postgres given but DATABASE_URL is not set "
+                        "(copy .env.example to .env and fill it in)"
+                    )
+                    return 2
+                stores.append(PostgresStore(dsn))
             store = MultiStore(*stores)
 
         as_of = datetime.fromisoformat(args.as_of) if args.as_of else None

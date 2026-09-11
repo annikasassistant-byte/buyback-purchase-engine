@@ -1,0 +1,21 @@
+# Render Blueprint (https://render.com/docs/blueprint-spec) - infra as code
+# for the API. Connect this repo in the Render dashboard -> "New Blueprint
+# Instance" and it reads this file; env vars marked `sync: false` are secrets
+# you set once in the dashboard, never committed here.
+services:
+  - type: web
+    name: buyback-purchase-engine-api
+    runtime: python
+    plan: starter # always-on, 512MB/0.5vCPU - fine for this workload
+    buildCommand: pip install -e ".[api]"
+    startCommand: uvicorn purchase_engine.api.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL_POOLED
+        sync: false # set from the Neon dashboard's pooled connection string
+      - key: API_KEY
+        sync: false # set to a real secret - the frontend must send the same one
+      - key: CORS_ORIGINS
+        value: http://localhost:3000 # append the Vercel frontend URL once deployed
+      - key: PYTHON_VERSION
+        value: "3.12"

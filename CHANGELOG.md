@@ -8,6 +8,31 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`PostgresStore` (Neon) + the `purchase_engine.api` backend** — see
+  [ADR&nbsp;0009](docs/adr/0009-postgres-store-for-the-frontend.md) and
+  [ADR&nbsp;0010](docs/adr/0010-fastapi-backend-for-the-frontend.md). The
+  Phase-3 frontend's actual data source and trigger:
+  - `PostgresStore` mirrors the same append-only history into Postgres
+    (`engine_run` + `recommendation`, upserted per `(run_id, produkt_id)`),
+    behind the `--postgres` CLI flag (needs `DATABASE_URL` — see
+    `.env.example`). New `postgres` extra (`psycopg[binary]`,
+    `python-dotenv`).
+  - `purchase_engine.api` (new `api` extra: FastAPI + uvicorn) — a thin HTTP
+    wrapper that runs the *real* engine on request, not a reimplementation:
+    `POST /runs` triggers `Engine.run()`, `POST /runs/{id}/allocate` re-runs
+    just `BudgetAllocator` for a new budget (live, no full re-run — the
+    budget-only path traced through `pipeline/quantity.py`),
+    `GET /runs/{id}/recommendations` and `POST/GET /actions` (buyer
+    BUY/ADJUST/SKIP logging — the Phase-4 backtest dataset). Shared-secret
+    `X-API-Key` auth, CORS allow-list. Deployed on Render — see
+    `render.yaml`; Vercel can't host a persistent Python process.
+  - `adapters/query.py` — the read side `PostgresStore` (write-only) doesn't
+    have: latest/by-id run lookup, recommendation listing, and
+    `load_buy_plans_for_allocation`, which reconstructs just enough of
+    `QuantityPlan`/`ProductProfitability` from the flattened Postgres columns
+    to feed the real `BudgetAllocator` — one implementation of the allocation
+    rule, two callers (CLI and API).
+  - New `buyer_action` table, written only by the API.
 - Checked the interim sample dataset (`BuyBack - Profit (Aktualisiert
   2026-09-02).xlsx`) into the repository under
   `data/raw/full_dataset_2026_run/` as a versioned fixture — see

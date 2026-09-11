@@ -5,7 +5,7 @@
 PY ?= python
 
 .DEFAULT_GOAL := help
-.PHONY: help install lint format format-check typecheck test cov check run golden clean
+.PHONY: help install lint format format-check typecheck test cov check run api api-dev golden clean
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -39,6 +39,12 @@ format-check:  ## Ruff format check (no writes)
 
 run:  ## Sample run against the default workbook (BUDGET overridable)
 	$(PY) -m purchase_engine --budget $(or $(BUDGET),1500)
+
+api-dev:  ## Run the API locally with autoreload (needs DATABASE_URL - see .env)
+	$(PY) -m uvicorn purchase_engine.api.app:app --reload
+
+api:  ## Run the API like production would (no reload)
+	$(PY) -m uvicorn purchase_engine.api.app:app --host 0.0.0.0 --port $(or $(PORT),8000)
 
 golden:  ## Regenerate the golden fixture (after an intended behaviour change)
 	PE_WRITE_GOLDEN=1 $(PY) -m pytest tests/golden --no-cov -q

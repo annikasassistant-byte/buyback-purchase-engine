@@ -8,10 +8,12 @@ never re-parses a product name and never writes to the parser's sheets.
 ## Layering (hexagonal / ports-and-adapters)
 
 ```
-            ┌─────────────────────────────────────────────────────────┐
-  cli.py    │  argparse, logging, the printed report                   │
-            └───────────────┬─────────────────────────────────────────┘
-                            │ builds + injects adapters, calls Engine.run()
+            ┌───────────────────────────┐   ┌───────────────────────────┐
+  cli.py    │ argparse, logging,         │   │ api/  FastAPI: trigger a   │  <- driving
+            │ the printed report         │   │ run, live budget re-alloc, │     adapters,
+            └──────────────┬─────────────┘   │ BUY/ADJUST/SKIP logging    │     two peers
+                            │ builds + injects└──────────────┬─────────────┘
+                            │ adapters, calls Engine.run() ──┘ (+ adapters/query.py, read-only)
             ┌───────────────▼─────────────────────────────────────────┐
   pipeline/ │  FeatureBuilder → PurchaseScorer / ConfidenceScorer     │
             │  → QuantityPlanner → BudgetAllocator → ExplanationGen    │
@@ -28,14 +30,17 @@ never re-parses a product name and never writes to the parser's sheets.
   adapters/ │  workbook.py       - read the "BuyBack - Profit" xlsx    │
             │  incoming.py       - EK_Normalisiert proxy (+ LPT stub)  │
             │  profitability.py  - TrailingWindowProfitability         │
-            │  store.py          - FileStore / SqliteStore             │
+            │  store.py          - FileStore / SqliteStore / PostgresStore │
+            │  query.py          - Postgres reads for api/ only         │
             └─────────────────────────────────────────────────────────┘
 ```
 
 **Import rule (enforced by review, and `ruff` isort grouping):** imports point
 *inward* only. `domain` imports nothing from the project. `pipeline` imports
-`domain` + `config`. `adapters` import `domain` + `config`. `cli` may import
-anything.
+`domain` + `config`. `adapters` import `domain` + `config`. `cli` and `api`
+may import anything - they're peers, both driving adapters, neither imports
+the other. `adapters/query.py` (read-only, API-specific) is imported only by
+`api/`, never by `pipeline` or `cli`.
 
 ## Data flow for one run
 
@@ -64,15 +69,26 @@ anything.
 |---|---|---|---|
 | `Profitability` | `get_profitability(pid, as_of) -> ProductProfitability` (6 fixed fields, fixed status vocabulary) | `TrailingWindowProfitability` | `ProfitEngineClient` reading a shared `product_profitability` table |
 | `IncomingStockSource` | `counts(as_of) -> IncomingCounts` (per-model-key `purchased_today` + `older_incoming`) | `EkNormalisiertIncoming` (proxy) | `LivePurchaseTableIncoming` once the hand-entered sheet is wired through the parser |
-| `RecommendationStore` | `save(RecommendationSet) -> None` | `FileStore` (JSONL) / `SqliteStore` | `PostgresStore` (`dim_product` SCD2 + `engine_run` + `recommendation`) |
+| `RecommendationStore` | `save(RecommendationSet) -> None` | `FileStore` (JSONL) / `SqliteStore` / `PostgresStore` (`engine_run` + `recommendation`, ADR 0009) | full `dim_product` SCD2 - the merge-redirect-on-read approach may turn out sufficient, see ADR 0009 |
 
 Scoring code never branches on `ProductProfitability.source` - swapping the
 adapter changes only that string.
 
+## `api/` - the second driving adapter (ADR 0010)
+
+`cli.py` and `api/` both build adapters and call into `pipeline/orchestrator.Engine`
+- neither is "the" entry point, they're peers. `api/` additionally depends on
+`adapters/query.py` (read-only Postgres queries the CLI never needs: latest
+run, live budget re-allocation via a reconstructed call into the real
+`BudgetAllocator`, buyer-action logging) - that module is never imported by
+`pipeline` or `domain`, so the one-way dependency rule still holds; it's a
+second read path bolted onto the adapters layer, not a hole in it.
+
 ## What is deliberately *not* here
 
-Buyer UI and BUY/ADJUST/SKIP logging (Phase 3), the JTL API, Keepa / Back Market
-signals, a real `PURCHASED → INCOMING → RECEIVED` ledger, Postgres. Each has a
+The buyer UI itself (a separate repository - `api/` is what it calls, not the
+UI), the JTL API, Keepa / Back Market signals, a real
+`PURCHASED → INCOMING → RECEIVED` ledger, full `dim_product` SCD2. Each has a
 named seam above.
 
 ## Decisions

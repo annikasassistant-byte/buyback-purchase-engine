@@ -10,10 +10,14 @@ re-parses a product name and never writes back to the parser
 ([ADR&nbsp;0002](docs/adr/0002-read-only-on-the-parser.md)).
 
 Implements Phase 2 of the Technical Implementation Plan
-(`docs/BuyBack Purchase Engine.html` in the analysis repo). Out of scope here:
-buyer UI / BUY-ADJUST-SKIP logging (Phase 3), the JTL API, Keepa / Back Market
-signals, the real Profit Engine, a `PURCHASED→INCOMING→RECEIVED` ledger,
-Postgres — each has a named seam.
+(`docs/BuyBack Purchase Engine.html` in the analysis repo), plus the Postgres
+store and HTTP API a Phase-3 buyer UI (separate repo) needs to actually run
+this instead of reading a static file — see
+[ADR&nbsp;0009](docs/adr/0009-postgres-store-for-the-frontend.md) /
+[ADR&nbsp;0010](docs/adr/0010-fastapi-backend-for-the-frontend.md). Still out
+of scope: the buyer UI itself (separate repo), the JTL API, Keepa / Back
+Market signals, the real Profit Engine, a full
+`PURCHASED→INCOMING→RECEIVED` ledger — each has a named seam.
 
 ---
 
@@ -51,7 +55,8 @@ python -m purchase_engine --workbook "/path/to/BuyBack - Profit ....xlsx" \
     --as-of 2026-08-24 --budget 1500
 python -m purchase_engine --json > run.json          # machine-readable
 python -m purchase_engine --sqlite                   # also mirror history to SQLite
-purchase-engine --help                               # console script (after install)
+python -m purchase_engine --postgres                 # also mirror to Postgres/Neon (needs DATABASE_URL)
+purchase-engine --help                                # console script (after install)
 ```
 
 Every run appends to `./artifacts/` (override with `--artifacts`):
@@ -60,9 +65,12 @@ Every run appends to `./artifacts/` (override with `--artifacts`):
 |---|---|---|
 | `runs.jsonl` | engine run | metadata, counts, data-freshness |
 | `recommendations.jsonl` | `(run_id, produkt_id)` | **the backtest dataset** |
-| `latest.json` | — | full most-recent `RecommendationSet` (for the Phase-3 API) |
+| `latest.json` | — | full most-recent `RecommendationSet` |
 
 Both `.jsonl` files are append-only ([ADR&nbsp;0006](docs/adr/0006-file-based-append-only-history.md)).
+`--postgres` mirrors the same history into Neon — see
+[Backend API](#backend-api) below for the part that actually matters to a
+frontend: Postgres, not these local files, is what the API reads.
 
 ---
 
@@ -73,11 +81,12 @@ src/purchase_engine/
 ├── domain/            pure value objects + the ports the outer layers implement
 │   ├── models.py        ProductFeatures, ScoreBreakdown, Recommendation, …
 │   └── ports.py         Protocols: Profitability, IncomingStockSource, RecommendationStore
-├── adapters/          the only layer that knows about Excel / files / SQLite
+├── adapters/          the only layer that knows about Excel / files / SQL
 │   ├── workbook.py      ParserWorkbook — read the profit xlsx, canonical columns
 │   ├── incoming.py      EkNormalisiertIncoming (proxy) + LivePurchaseTableIncoming (stub)
 │   ├── profitability.py TrailingWindowProfitability (the 6-field seam)
-│   └── store.py         FileStore / SqliteStore / MultiStore / NullStore
+│   ├── store.py         FileStore / SqliteStore / PostgresStore / MultiStore / NullStore
+│   └── query.py         Postgres read side for the API — latest run, live budget re-allocation
 ├── pipeline/          the computation; depends only on domain + config
 │   ├── features.py      FeatureBuilder
 │   ├── scoring.py       PurchaseScorer
@@ -85,16 +94,22 @@ src/purchase_engine/
 │   ├── quantity.py      QuantityPlanner + BudgetAllocator
 │   ├── explain.py       ExplanationGenerator
 │   └── orchestrator.py  Engine.run() — wires it together
+├── api/               HTTP front door (FastAPI) — a driving adapter, peer of cli.py
+│   ├── app.py            app factory, CORS, schema bootstrap on startup
+│   ├── settings.py       env-var deployment config (DATABASE_URL, API_KEY, …)
+│   ├── deps.py           X-API-Key auth dependency
+│   ├── schemas.py        Pydantic request/response shapes
+│   └── routers/          runs.py (trigger/read/allocate), actions.py (BUY/ADJUST/SKIP)
 ├── config.py         load + validate config/engine.yml -> typed EngineConfig
 ├── errors.py         PurchaseEngineError hierarchy
 ├── cli.py            argparse entry point (python -m purchase_engine)
 └── config/engine.yml shipped default config
 
 tests/   unit/  property/  golden/
-docs/    architecture.md  adr/0001..0008
+docs/    architecture.md  adr/0001..0010
 ```
 
-Imports point inward only: `domain ← adapters ← pipeline ← cli`. See
+Imports point inward only: `domain ← adapters ← pipeline ← {cli, api}`. See
 [`docs/architecture.md`](docs/architecture.md).
 
 ---
@@ -194,6 +209,42 @@ python -m purchase_engine --config ./engine.yml --budget 1500
 It is parsed into a frozen typed `EngineConfig` and **validated** every run; an
 invalid file raises `ConfigError`. A short `config_hash` is stamped on every run
 and asserted by the golden test.
+
+---
+
+## Backend API
+
+The frontend's only dependency — it never talks to Postgres directly, never
+reimplements scoring/allocation logic. See
+[ADR&nbsp;0010](docs/adr/0010-fastapi-backend-for-the-frontend.md).
+
+```bash
+pip install -e ".[api]"                # FastAPI + uvicorn + psycopg + dotenv
+cp .env.example .env && $EDITOR .env   # DATABASE_URL_POOLED at minimum
+make api-dev                            # http://localhost:8000, autoreload
+# or: uvicorn purchase_engine.api.app:app --reload
+```
+
+Interactive docs at `/docs` once running (FastAPI's built-in Swagger UI).
+
+| Endpoint | What it does |
+|---|---|
+| `POST /runs` | Runs the **real** engine (same code path as the CLI) and persists it. What a buyer's "Run" button calls. |
+| `GET /runs/latest`, `GET /runs/{run_id}` | Read back a run's metadata/counts. |
+| `GET /runs/{run_id}/recommendations?label=BUY` | The product list — score, confidence, reasons, risks. |
+| `POST /runs/{run_id}/allocate` | Live budget re-ranking — re-runs only `BudgetAllocator` against cached data. No full engine run. What a budget field calls on every change. |
+| `POST /actions`, `GET /actions` | Log/read BUY · ADJUST · SKIP — the Phase-4 backtest dataset. |
+
+Auth is a shared secret: set `API_KEY`, the frontend sends it back as
+`X-API-Key`. Unset in local dev only — every request is unauthenticated then,
+with a startup warning saying so. `CORS_ORIGINS` is a comma-separated
+allow-list (fails closed).
+
+**Deployed on Render, not Vercel** — Vercel can't run a persistent Python
+process; the engine's xlsx/pandas read is a bad fit for a serverless
+function. `render.yaml` is a ready-to-use Blueprint: connect the repo in the
+Render dashboard, set the two `sync: false` secrets
+(`DATABASE_URL_POOLED`, `API_KEY`), deploy.
 
 ---
 

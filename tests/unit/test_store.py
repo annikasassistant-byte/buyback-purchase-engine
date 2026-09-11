@@ -1,13 +1,39 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 
-from purchase_engine.adapters.store import FileStore, MultiStore, NullStore, SqliteStore
-from purchase_engine.domain.models import DataFreshness, RecommendationSet
+import psycopg
+import pytest
+
+from purchase_engine.adapters.store import (
+    FileStore,
+    MultiStore,
+    NullStore,
+    PostgresStore,
+    SqliteStore,
+    dsn_from_env,
+)
+from purchase_engine.domain.models import (
+    ConfidenceBreakdown,
+    DataFreshness,
+    ProductFeatures,
+    ProductProfitability,
+    QuantityPlan,
+    Recommendation,
+    RecommendationSet,
+    ScoreBreakdown,
+)
+
+_NEEDS_DB = pytest.mark.skipif(
+    not os.environ.get("DATABASE_URL"), reason="needs DATABASE_URL (Neon) - not set here"
+)
 
 
-def _result(run_id: str = "r1") -> RecommendationSet:
+def _result(
+    run_id: str = "r1", recommendations: list[Recommendation] | None = None
+) -> RecommendationSet:
     return RecommendationSet(
         run_id=run_id,
         generated_at="2026-08-24T10:00:00",
@@ -18,7 +44,95 @@ def _result(run_id: str = "r1") -> RecommendationSet:
             "2026-08-24", "2026-08-18", "2026-08-26", None, "2026-09-03", True, "n"
         ),
         counts={"scored": 0, "buy": 0},
-        recommendations=[],
+        recommendations=recommendations or [],
+    )
+
+
+def _recommendation(produkt_id: str = "BB999999") -> Recommendation:
+    features = ProductFeatures(
+        produkt_id=produkt_id,
+        name="Test Product",
+        kategorie="Handys",
+        modell="TESTMODEL",
+        is_duplicate=False,
+        units_30d=5.0,
+        units_90d=12.0,
+        daily_velocity=0.167,
+        velocity_window_days=30,
+        days_since_sale=2,
+        inventory_joined=True,
+        current_sellable=0.0,
+        on_hand=0.0,
+        in_orders=0.0,
+        purchased_today=0,
+        older_incoming=1,
+        effective_stock=1.0,
+        days_of_supply=6.0,
+        availability="OUT_OF_STOCK",
+        join_source="produkt_id",
+        mapping_quelle="unique_key",
+        profitability=ProductProfitability(
+            produkt_id=produkt_id,
+            expected_vk=250.0,
+            expected_ek=150.0,
+            expected_gross_profit=100.0,
+            margin_pct=0.4,
+            status="CONFIRMED",
+            source="trailing_window",
+        ),
+        margin_pct=0.4,
+        hist_success=1.0,
+        ok_rows=6,
+    )
+    score = ScoreBreakdown(
+        demand=80.0,
+        inventory_need=90.0,
+        profit=70.0,
+        market=None,
+        overstock_penalty=0.0,
+        effective_weights={"demand": 0.4, "inventory_need": 0.33, "profit": 0.27},
+        single_component_capped=False,
+        score=82,
+    )
+    confidence = ConfidenceBreakdown(
+        mapping=100.0,
+        sales_sufficiency=90.0,
+        inventory_reliability=100.0,
+        profitability_reliability=100.0,
+        evidence_components_present=3,
+        evidence_penalty=0.0,
+        confidence=95,
+    )
+    quantity = QuantityPlan(
+        daily_velocity=0.167,
+        target_coverage_days=14.0,
+        effective_stock=1.0,
+        required_units=2,
+        per_sku_capped_qty=2,
+        recommended_qty=2,
+        per_sku_cap=8,
+        budget_trimmed=False,
+    )
+    return Recommendation(
+        produkt_id=produkt_id,
+        name="Test Product",
+        kategorie="Handys",
+        modell="TESTMODEL",
+        label="BUY",
+        purchase_score=82,
+        confidence=95,
+        recommended_qty=2,
+        availability="OUT_OF_STOCK",
+        features=features,
+        score=score,
+        confidence_breakdown=confidence,
+        quantity=quantity,
+        reasons=["Sold 5 units in the last 30 days."],
+        risks=[],
+        est_unit_ek=150.0,
+        est_gross_profit_per_eur=0.667,
+        est_total_cost=300.0,
+        est_total_gross_profit=200.0,
     )
 
 
@@ -51,3 +165,38 @@ def test_multistore_fans_out(tmp_path):
 
 def test_null_store_is_a_noop():
     NullStore().save(_result())
+
+
+@_NEEDS_DB
+def test_postgres_store_upserts_and_flattens_budget_fields():
+    dsn = dsn_from_env()
+    assert dsn is not None
+    run_id = "pytest-postgres-store-idempotency"
+    store = PostgresStore(dsn)
+    try:
+        rec = _recommendation()
+        store.save(_result(run_id, [rec]))
+        store.save(_result(run_id, [rec]))  # same run_id -> upsert, not duplicate
+
+        with psycopg.connect(dsn) as cx, cx.cursor() as cur:
+            cur.execute("select count(*) from engine_run where run_id = %s", (run_id,))
+            run_count = cur.fetchone()
+            assert run_count is not None
+            assert run_count[0] == 1
+
+            cur.execute(
+                "select count(*), per_sku_capped_qty, est_unit_ek, est_gross_profit_per_eur "
+                "from recommendation where run_id = %s "
+                "group by per_sku_capped_qty, est_unit_ek, est_gross_profit_per_eur",
+                (run_id,),
+            )
+            rows = cur.fetchall()
+            assert len(rows) == 1  # one product, upserted not duplicated
+            count, per_sku_capped_qty, est_unit_ek, est_gross_profit_per_eur = rows[0]
+            assert count == 1
+            assert per_sku_capped_qty == rec.quantity.per_sku_capped_qty
+            assert est_unit_ek == rec.est_unit_ek
+            assert est_gross_profit_per_eur == rec.est_gross_profit_per_eur
+    finally:
+        with psycopg.connect(dsn) as cx, cx.cursor() as cur:
+            cur.execute("delete from engine_run where run_id = %s", (run_id,))  # cascades

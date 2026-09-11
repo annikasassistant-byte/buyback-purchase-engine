@@ -21,3 +21,13 @@ class DataSourceError(PurchaseEngineError):
 
 class IncomingSourceError(PurchaseEngineError):
     """The configured incoming-stock source cannot be built or read."""
+
+
+class StoreError(PurchaseEngineError):
+    """A :class:`~purchase_engine.domain.ports.RecommendationStore` adapter is
+    misconfigured - e.g. ``--postgres``/the API given without ``DATABASE_URL``
+    set, or the optional driver for one isn't installed."""
+
+
+class NotFoundError(PurchaseEngineError):
+    """The API was asked for a run/product that doesn't exist (yet)."""
