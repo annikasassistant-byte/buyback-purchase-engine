@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 
 import pytest
 
@@ -24,7 +25,8 @@ def dsn() -> str:
 @pytest.fixture
 def seeded_run(dsn: str):
     """One run, one BUY-eligible product, cleaned up after the test."""
-    run_id = "pytest-query-fixture"
+    # unique per invocation - see the matching comment in test_store.py
+    run_id = f"pytest-query-fixture-{uuid.uuid4().hex[:8]}"
     store = PostgresStore(dsn)
     rec = _recommendation("BB999998")
     store.save(_result(run_id, [rec]))

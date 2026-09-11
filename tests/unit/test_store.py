@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import uuid
 
 import psycopg
 import pytest
@@ -171,7 +172,10 @@ def test_null_store_is_a_noop():
 def test_postgres_store_upserts_and_flattens_budget_fields():
     dsn = dsn_from_env()
     assert dsn is not None
-    run_id = "pytest-postgres-store-idempotency"
+    # unique per invocation - CI's 3.11/3.12/3.13 matrix jobs run concurrently
+    # against the same database; a fixed id here means one job's cleanup can
+    # delete another job's still-in-progress row (see CHANGELOG).
+    run_id = f"pytest-postgres-store-{uuid.uuid4().hex[:8]}"
     store = PostgresStore(dsn)
     try:
         rec = _recommendation()

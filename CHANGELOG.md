@@ -33,6 +33,17 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     to feed the real `BudgetAllocator` — one implementation of the allocation
     rule, two callers (CLI and API).
   - New `buyer_action` table, written only by the API.
+
+### Fixed
+
+- Postgres-backed tests (`test_store.py`, `test_query.py`) used a fixed,
+  hardcoded `run_id` — harmless single-job, but CI's 3.11/3.12/3.13 matrix
+  runs concurrently against the same database, so one job's `finally:`
+  cleanup could delete a row another job was still mid-assertion on. Caused
+  `CI / quality (3.11)` and `(3.13)` to fail intermittently while `(3.12)`
+  passed — not a real version difference, a race. Both now generate a
+  `uuid.uuid4()`-suffixed `run_id` per test invocation.
+
 - Checked the interim sample dataset (`BuyBack - Profit (Aktualisiert
   2026-09-02).xlsx`) into the repository under
   `data/raw/full_dataset_2026_run/` as a versioned fixture — see
