@@ -12,7 +12,10 @@ Once the API was actually deployed to `buyback-purchase-engine-api.onrender.com`
 it was tested directly against that live instance and its real database -
 not just `TestClient` against an in-process app - auth, CORS, injection
 resistance, error handling, and a full `POST /runs` → `allocate` → `actions`
-round trip. Four real findings came out of that pass, all fixed here.
+round trip, twice: once right after deploying, and again after redeploying
+the first round's fixes, to confirm they actually landed (`/docs` returning
+`404` on the live instance was the tell). Six real findings total, all fixed
+here.
 
 ## Decision
 
@@ -52,6 +55,35 @@ round trip. Four real findings came out of that pass, all fixed here.
      directly against the live deployment: the origin allow-list itself was
      never the problem - `CORS_ORIGINS` is a concrete list, not a wildcard,
      so this was unused permissiveness, not an active vulnerability.)
+
+5. **`429`s now carry a `Retry-After` header.** RFC 9110 expects one; without
+   it a frontend has no signal for how long to wait before showing "try
+   again". `_RunGuard.retry_after_seconds()` estimates it from how long the
+   in-flight run has already taken versus the ~99s worst case measured above
+   - a hint, not an exact promise, but better than nothing. (The lock itself
+   moved from a bare module-level `threading.Lock` + a `global`-mutated
+   timestamp into a small `_RunGuard` class - `ruff` correctly flagged the
+   `global` statement as a smell; the class version needs neither `global`
+   nor any behaviour change.)
+
+6. **Added unconditional security-header middleware** - `X-Content-Type-Options:
+   nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
+   `Strict-Transport-Security`. None of these change behaviour for a pure
+   JSON API with no HTML views and no cookies; they cost nothing and close
+   off a class of findings any future scan would otherwise flag. HSTS is
+   safe unconditionally here specifically because Render terminates TLS in
+   front of this app - plain HTTP never reaches it.
+
+**Considered and deliberately not done**: a full rate-limiting middleware
+(e.g. `slowapi` + Redis) for the general endpoint surface. This API has
+exactly one legitimate caller (the frontend, behind the shared `API_KEY`),
+and the one endpoint with a real abuse/cost profile (`POST /runs`, ~99s of
+CPU and real Neon compute per call) already has the concurrency guard above.
+Adding a request-counting rate limiter on top, with the extra dependency and
+(for it to work correctly across restarts) a Redis backend, would be
+defending against a threat model this deployment doesn't actually have yet.
+Revisit if the API ever gets more than one legitimate caller, or moves
+off a single shared secret.
 
 ## Consequences
 

@@ -15,10 +15,10 @@ see ADR 0011 for the concurrency guard that number justified).
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from purchase_engine import __version__
@@ -70,6 +70,21 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def _security_headers(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        """Cheap, unconditional hardening for a pure-JSON API (ADR 0011) -
+        none of these change behaviour, they just remove a class of findings
+        from any future scan. HSTS is safe here specifically because Render
+        terminates TLS in front of this app; plain HTTP never reaches it."""
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+        return response
 
     @app.get("/health", tags=["meta"])
     def health() -> dict[str, str]:

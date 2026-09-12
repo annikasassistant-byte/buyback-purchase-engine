@@ -22,6 +22,16 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     of `!=`.
   - Removed unused `allow_credentials=True` from CORS config — auth is a
     header, not a cookie; nothing needed it.
+  - `429` responses now carry a `Retry-After` header, estimated from how
+    long the in-flight run has already taken. The lock moved from a bare
+    module-level `threading.Lock` + `global` timestamp into a small
+    `_RunGuard` class (`ruff` flagged the `global`; same behaviour either
+    way).
+  - Unconditional security-header middleware — `X-Content-Type-Options`,
+    `X-Frame-Options`, `Referrer-Policy`, `Strict-Transport-Security`.
+    Verified fixes actually reached production by redeploying and
+    re-testing the live instance a second time (`/docs` → `404` confirmed
+    it), not just locally.
 
 ### Added
 

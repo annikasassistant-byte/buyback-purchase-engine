@@ -64,6 +64,16 @@ def test_health_needs_no_auth(client):
     assert resp.json()["status"] == "ok"
 
 
+def test_security_headers_present_on_every_response(client):
+    """ADR 0011: cheap, unconditional hardening - checked on a 200 and a 404
+    to confirm the middleware runs regardless of how the route handler ends."""
+    for resp in (client.get("/health"), client.get("/runs/does-not-exist")):
+        assert resp.headers.get("X-Content-Type-Options") == "nosniff"
+        assert resp.headers.get("X-Frame-Options") == "DENY"
+        assert resp.headers.get("Referrer-Policy") == "no-referrer"
+        assert "max-age" in resp.headers.get("Strict-Transport-Security", "")
+
+
 def test_wrong_api_key_is_rejected_when_configured(client):
     from purchase_engine.api.settings import get_settings
 
@@ -173,6 +183,9 @@ def test_concurrent_runs_get_a_429_not_two_overlapping_engine_runs(client, monke
             responses = [f.result() for f in futures]
         codes = sorted(r.status_code for r in responses)
         assert codes == [201, 429], [r.text for r in responses]
+        rejected = next(r for r in responses if r.status_code == 429)
+        assert "Retry-After" in rejected.headers
+        assert int(rejected.headers["Retry-After"]) > 0
     finally:
         import psycopg
 

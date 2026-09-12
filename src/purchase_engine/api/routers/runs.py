@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -32,15 +33,46 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/runs", tags=["runs"], dependencies=[Depends(require_api_key)])
 
-# Guards `trigger_run` against overlapping runs. Measured against the live
-# Render deployment (ADR 0011), one run takes ~17s on a dedicated machine but
-# ~99s on Render's free-tier shared CPU - two full runs competing for that
-# same shared CPU would each take even longer, not run independently in
-# parallel. A double-click before a "Run" button disables itself is exactly
-# the case this catches. Process-local (`threading.Lock`, not distributed) -
-# correct for Render's default single instance; revisit if this API is ever
-# scaled to multiple instances.
-_run_lock = threading.Lock()
+
+class _RunGuard:
+    """Guards `trigger_run` against overlapping runs. Measured against the
+    live Render deployment (ADR 0011), one run takes ~17s on a dedicated
+    machine but ~99s on Render's free-tier shared CPU - two full runs
+    competing for that same shared CPU would each take even longer, not run
+    independently in parallel. A double-click before a "Run" button disables
+    itself is exactly the case this catches.
+
+    Process-local (`threading.Lock`, not distributed) - correct for Render's
+    default single instance; revisit if this API is ever scaled to multiple
+    instances. A plain module-level lock + timestamp pair works just as
+    well; wrapped in a class only to avoid a ``global`` statement in the
+    route function.
+    """
+
+    def __init__(self, ceiling_seconds: float = 110) -> None:
+        self._lock = threading.Lock()
+        self._started_at: float | None = None
+        self._ceiling_seconds = ceiling_seconds  # margin over the ~99s worst case
+
+    def try_acquire(self) -> bool:
+        acquired = self._lock.acquire(blocking=False)
+        if acquired:
+            self._started_at = time.monotonic()
+        return acquired
+
+    def release(self) -> None:
+        self._started_at = None
+        self._lock.release()
+
+    def retry_after_seconds(self) -> int:
+        """A rough hint for a 429's ``Retry-After``, not an exact promise -
+        how much of the ceiling looks left, given how long the in-flight run
+        has already taken."""
+        elapsed = time.monotonic() - self._started_at if self._started_at else 0.0
+        return max(5, round(self._ceiling_seconds - elapsed))
+
+
+_run_guard = _RunGuard()
 
 
 @router.post("", response_model=RunSummary, status_code=status.HTTP_201_CREATED)
@@ -56,10 +88,11 @@ def trigger_run(body: RunRequest) -> dict[str, object]:
     background job + polling only if the workbook grows enough to make that
     untrue, or if Render's request limit becomes the binding constraint.
     """
-    if not _run_lock.acquire(blocking=False):
+    if not _run_guard.try_acquire():
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
             "a run is already in progress - wait for it to finish and try again",
+            headers={"Retry-After": str(_run_guard.retry_after_seconds())},
         )
     try:
         settings = get_settings()
@@ -85,7 +118,7 @@ def trigger_run(body: RunRequest) -> dict[str, object]:
             raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "run vanished after save")
         return run
     finally:
-        _run_lock.release()
+        _run_guard.release()
 
 
 @router.get("/latest", response_model=RunSummary)
