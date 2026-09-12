@@ -32,6 +32,17 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     Verified fixes actually reached production by redeploying and
     re-testing the live instance a second time (`/docs` → `404` confirmed
     it), not just locally.
+  - New `GET /ready` — actually runs `SELECT 1` against Postgres, unlike
+    `/health` (correctly a pure liveness check, left unchanged; still what
+    Render's `healthCheckPath` watches). For diagnosing "is it the app or
+    the database" without spending ~99s finding out via `POST /runs`.
+  - Round 3 verification against the live instance: two **real** concurrent
+    `POST /runs` fired at once (not mocked) — one `201` after 102s, one
+    `429` after 0.7s, confirming the lock holds under real timing; confirmed
+    no seller PII (name/postal code, present in the raw workbook per ADR
+    0007) reaches any API response; confirmed unicode and embedded markup
+    in a buyer note round-trip byte-for-byte and are never executed as HTML
+    (this API renders nothing).
 
 ### Added
 

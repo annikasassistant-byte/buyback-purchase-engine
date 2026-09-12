@@ -18,7 +18,8 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, Response
+import psycopg
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from purchase_engine import __version__
@@ -88,7 +89,31 @@ def create_app() -> FastAPI:
 
     @app.get("/health", tags=["meta"])
     def health() -> dict[str, str]:
+        """Liveness only - no I/O, always 200 if the process is up. Render's
+        `healthCheckPath` points here on purpose: a transient Neon blip
+        shouldn't make Render think the whole process is unhealthy and
+        restart it - that would not fix a database outage. See `/ready`
+        for the check that actually looks (ADR 0011)."""
         return {"status": "ok", "version": __version__}
+
+    @app.get("/ready", tags=["meta"])
+    def ready() -> dict[str, str]:
+        """Readiness - actually checks Postgres is reachable. Not what
+        Render's own restart logic watches (see `/health`); this is for a
+        human or the frontend asking "is it the app or the database" during
+        an incident, without spending ~99s finding out via `POST /runs`."""
+        settings = get_settings()
+        try:
+            with (
+                psycopg.connect(settings.database_url, connect_timeout=3) as cx,
+                cx.cursor() as cur,
+            ):
+                cur.execute("SELECT 1")
+        except psycopg.Error as exc:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE, f"database unreachable: {exc}"
+            ) from exc
+        return {"status": "ok", "database": "reachable"}
 
     app.include_router(runs.router)
     app.include_router(actions.router)

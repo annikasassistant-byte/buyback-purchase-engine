@@ -64,6 +64,14 @@ def test_health_needs_no_auth(client):
     assert resp.json()["status"] == "ok"
 
 
+def test_ready_actually_checks_postgres(client):
+    """ADR 0011: /health is pure liveness (no I/O); /ready is the one that
+    looks - confirms it actually round-trips a query, not just returns ok."""
+    resp = client.get("/ready")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok", "database": "reachable"}
+
+
 def test_security_headers_present_on_every_response(client):
     """ADR 0011: cheap, unconditional hardening - checked on a 200 and a 404
     to confirm the middleware runs regardless of how the route handler ends."""

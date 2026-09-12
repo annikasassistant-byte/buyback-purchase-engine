@@ -10,12 +10,16 @@ Accepted
 
 Once the API was actually deployed to `buyback-purchase-engine-api.onrender.com`,
 it was tested directly against that live instance and its real database -
-not just `TestClient` against an in-process app - auth, CORS, injection
-resistance, error handling, and a full `POST /runs` → `allocate` → `actions`
-round trip, twice: once right after deploying, and again after redeploying
-the first round's fixes, to confirm they actually landed (`/docs` returning
-`404` on the live instance was the tell). Six real findings total, all fixed
-here.
+not just `TestClient` against an in-process app - across three rounds, each
+confirming the previous round's fixes actually reached production before
+looking for more (`/docs` returning `404`, then the security headers
+appearing, were the tells). Auth, CORS, injection resistance, error
+handling, HTTP-method/case/trailing-slash behaviour, unicode round-tripping,
+a PII check against the response payload, and a full `POST /runs` →
+`allocate` → `actions` round trip - including, in round 3, two **real**
+concurrent `POST /runs` fired at the live URL simultaneously (not mocked)
+to prove the lock added in round 1 actually holds under real network
+timing, not just in a unit test. Eight real findings total, all fixed here.
 
 ## Decision
 
@@ -73,6 +77,36 @@ here.
    off a class of findings any future scan would otherwise flag. HSTS is
    safe unconditionally here specifically because Render terminates TLS in
    front of this app - plain HTTP never reaches it.
+
+7. **Added `GET /ready`, separate from `GET /health`.** `/health` is
+   correctly a pure liveness check per current guidance (no I/O - if it's
+   down, restarting the process is the right call) and stays wired to
+   Render's `healthCheckPath` unchanged. `/ready` actually runs `SELECT 1`
+   against Postgres - not for Render's own restart logic (a transient Neon
+   blip making Render cycle the whole service would fix nothing), but so a
+   human - or the frontend - can tell "is it the app or the database" during
+   an incident without spending ~99s finding out the hard way via `POST /runs`.
+
+**Verified, not just fixed, against the live instance in round 3:**
+- **The concurrency lock, for real.** Fired two genuine `POST /runs` at the
+  live URL at once: one came back `201` after 102s, the other `429` after
+  0.7s, and the loser's response confirmed it never touched the database -
+  the mocked local test (fast, cheap) proves the route wiring; this proved
+  the actual behavior under real network/CPU timing.
+- **No PII leak.** The workbook carries real seller names and postal codes
+  (ADR 0007); checked a full recommendation payload field-by-field against
+  the live API - none of it appears. `ProductFeatures`/`Recommendation` are
+  aggregated per product, not per purchase transaction, so the seller PII
+  living in `EK_Normalisiert` never reaches this layer. Worth confirming
+  explicitly rather than assuming.
+- **Unicode and embedded markup round-trip correctly.** A buyer note with
+  German umlauts, an emoji, and a literal `<script>` tag came back
+  byte-for-byte identical on read-back. (An earlier attempt to test this
+  produced a `400` - traced to this session's own shell mangling the
+  UTF-8 in a `curl -d` argument, not an API bug; re-tested via a file body
+  to confirm.) The `<script>` tag is stored as inert string data - this API
+  never renders HTML, so there's nothing here for it to execute against;
+  that responsibility sits with whatever eventually displays a note.
 
 **Considered and deliberately not done**: a full rate-limiting middleware
 (e.g. `slowapi` + Redis) for the general endpoint surface. This API has
