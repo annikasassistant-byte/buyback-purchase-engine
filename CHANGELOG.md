@@ -6,6 +6,23 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- **Hardening found by testing the live Render deployment** — see
+  [ADR&nbsp;0011](docs/adr/0011-production-hardening-from-live-testing.md).
+  - `POST /runs` now guarded by a process-local lock — measured ~99s per run
+    on Render's free-tier shared CPU (vs ~17s on a dedicated dev machine);
+    two overlapping runs previously competed for the same CPU instead of
+    being independent. A second request while one is in flight now gets
+    `429 Too Many Requests` immediately.
+  - `/docs`, `/redoc`, `/openapi.json` are off by default once `API_KEY` is
+    set — they're FastAPI's own routes and were never behind
+    `require_api_key`. New `ENABLE_DOCS` env var to override either way.
+  - `require_api_key` uses `secrets.compare_digest` (constant-time) instead
+    of `!=`.
+  - Removed unused `allow_credentials=True` from CORS config — auth is a
+    header, not a cookie; nothing needed it.
+
 ### Added
 
 - **`PostgresStore` (Neon) + the `purchase_engine.api` backend** — see

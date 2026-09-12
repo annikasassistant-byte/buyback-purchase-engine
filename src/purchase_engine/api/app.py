@@ -7,7 +7,9 @@
 or ``make api``. Deployed on Render - see ``render.yaml`` and
 ``docs/adr/0010-fastapi-backend-for-the-frontend.md`` for why not Vercel
 (no persistent Python process there) and why synchronous request handlers
-(a full run is ~17s measured, not job-queue territory yet).
+(a full run measures ~17s on a dedicated machine, ~99s on Render's free
+tier's shared CPU - both fine against Render's 100-minute request limit,
+see ADR 0011 for the concurrency guard that number justified).
 """
 
 from __future__ import annotations
@@ -51,11 +53,20 @@ def create_app() -> FastAPI:
             "talks to Postgres directly."
         ),
         lifespan=_lifespan,
+        # /docs, /redoc, /openapi.json are FastAPI's own routes - they don't
+        # go through require_api_key. Fine to browse locally; off by default
+        # anywhere API_KEY is set (ADR 0011). ENABLE_DOCS overrides either way.
+        docs_url="/docs" if settings.enable_docs else None,
+        redoc_url="/redoc" if settings.enable_docs else None,
+        openapi_url="/openapi.json" if settings.enable_docs else None,
     )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_credentials=True,
+        # No allow_credentials: auth is a header (X-API-Key), not a cookie -
+        # credentialed CORS is unused and only widens the attack surface.
+        # Revisit only if Neon Auth session cookies get added on the
+        # frontend later (ADR 0011).
         allow_methods=["*"],
         allow_headers=["*"],
     )

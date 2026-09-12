@@ -5,6 +5,7 @@ live budget re-allocation endpoint the buyer's budget field calls.
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -31,6 +32,16 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/runs", tags=["runs"], dependencies=[Depends(require_api_key)])
 
+# Guards `trigger_run` against overlapping runs. Measured against the live
+# Render deployment (ADR 0011), one run takes ~17s on a dedicated machine but
+# ~99s on Render's free-tier shared CPU - two full runs competing for that
+# same shared CPU would each take even longer, not run independently in
+# parallel. A double-click before a "Run" button disables itself is exactly
+# the case this catches. Process-local (`threading.Lock`, not distributed) -
+# correct for Render's default single instance; revisit if this API is ever
+# scaled to multiple instances.
+_run_lock = threading.Lock()
+
 
 @router.post("", response_model=RunSummary, status_code=status.HTTP_201_CREATED)
 def trigger_run(body: RunRequest) -> dict[str, object]:
@@ -38,33 +49,43 @@ def trigger_run(body: RunRequest) -> dict[str, object]:
     ``python -m purchase_engine --budget ...`` - and persist it to Postgres.
 
     Synchronous on purpose: a run over the shipped sample workbook (374
-    products) measures ~17s, well inside a normal request timeout on a real
-    host (unlike Vercel's serverless functions, which is exactly why this
-    API isn't deployed there - see ADR 0010). Revisit with a background job
-    + polling only if the workbook grows enough to make that untrue.
+    products) measures ~17s on a dedicated machine, ~99s on Render's
+    free-tier shared CPU - both comfortably inside Render's 100-minute
+    request limit (unlike Vercel's serverless functions, which is exactly
+    why this API isn't deployed there - see ADR 0010). Revisit with a
+    background job + polling only if the workbook grows enough to make that
+    untrue, or if Render's request limit becomes the binding constraint.
     """
-    settings = get_settings()
-    workbook = settings.workbook_path or find_default_workbook()
-    if workbook is None:
+    if not _run_lock.acquire(blocking=False):
         raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "no workbook found - set WORKBOOK_PATH",
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "a run is already in progress - wait for it to finish and try again",
         )
-
-    cfg = load_config()
-    store = PostgresStore(settings.database_url)
-    as_of = datetime.combine(body.as_of, datetime.min.time()) if body.as_of else None
-
     try:
-        result = Engine(cfg, store).run(workbook, as_of=as_of, budget_eur=body.budget_eur)
-    except PurchaseEngineError as exc:
-        log.error("engine run failed: %s", exc)  # noqa: TRY400 - user-facing, not a traceback
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+        settings = get_settings()
+        workbook = settings.workbook_path or find_default_workbook()
+        if workbook is None:
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "no workbook found - set WORKBOOK_PATH",
+            )
 
-    run = query.get_run(settings.database_url, result.run_id)
-    if run is None:  # pragma: no cover - store.save() just committed this row
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "run vanished after save")
-    return run
+        cfg = load_config()
+        store = PostgresStore(settings.database_url)
+        as_of = datetime.combine(body.as_of, datetime.min.time()) if body.as_of else None
+
+        try:
+            result = Engine(cfg, store).run(workbook, as_of=as_of, budget_eur=body.budget_eur)
+        except PurchaseEngineError as exc:
+            log.error("engine run failed: %s", exc)  # noqa: TRY400 - user-facing, not a trace
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+        run = query.get_run(settings.database_url, result.run_id)
+        if run is None:  # pragma: no cover - store.save() just committed this row
+            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "run vanished after save")
+        return run
+    finally:
+        _run_lock.release()
 
 
 @router.get("/latest", response_model=RunSummary)
