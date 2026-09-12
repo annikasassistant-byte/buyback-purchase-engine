@@ -41,6 +41,16 @@ jobs:
       - name: mypy
         run: mypy
 
+      - name: Security (bandit + pip-audit)
+        # Once per matrix run is enough - neither tool's result depends on
+        # the Python version, and CI's job is clean by construction (only
+        # `.[dev]` is installed here), unlike a shared local dev venv -
+        # see ADR 0011 for why that distinction matters.
+        if: matrix.python-version == '3.12'
+        run: |
+          bandit -r src/purchase_engine
+          pip-audit
+
       - name: Tests
         # `tests/golden` pins exact scores against the checked-in workbook and
         # is deliberately slow - kept out of the fast path (ADR 0007), not

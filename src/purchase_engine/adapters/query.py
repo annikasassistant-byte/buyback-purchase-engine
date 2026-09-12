@@ -188,7 +188,9 @@ def insert_buyer_action(
             (run_id, produkt_id, action, qty, note, actor),
         )
         row = cur.fetchone()
-        assert row is not None  # INSERT ... RETURNING always yields one row
+        if row is None:  # pragma: no cover - INSERT ... RETURNING always yields one row
+            msg = "insert into buyer_action returned no row"
+            raise StoreError(msg)
         return row
 
 

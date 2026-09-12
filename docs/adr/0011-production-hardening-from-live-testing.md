@@ -22,6 +22,16 @@ behaviour under concurrent load, and a full `POST /runs` → `allocate` →
 lock added in round 1 actually holds under real network timing, not just in
 a unit test. Nine real findings total, all fixed here.
 
+Round 5 changed *kind*, not just count: four rounds of manual dynamic testing
+(hand-crafted requests against live endpoints) had converged - round 4 took
+real digging to find one genuine issue, against three or four each in earlier
+rounds, the expected shape of a maturing pass, not a sign of nothing left to
+check. Continuing to hand-poke endpoints past that point would have been
+motion, not progress. The two credible next steps named at the end of round
+4 were automated security tooling or waiting for the frontend to exist;
+round 5 is the first of those - `pip-audit` (dependency CVEs) and `bandit`
+(static analysis), run for the first time.
+
 ## Decision
 
 1. **`POST /runs` measures ~99s on Render's free tier**, not the ~17s
@@ -132,6 +142,28 @@ a unit test. Nine real findings total, all fixed here.
    exactly what this was chosen for in ADR 0009 - confirmed, not just
    assumed.
 
+**Round 5 - automated tooling, not more manual requests:**
+
+10. **`bandit` static-analysis sweep of the whole package** (`src/purchase_engine`,
+    not just `api/`) found one real, if minor, thing: `adapters/query.py`
+    used a bare `assert` to guard "`INSERT ... RETURNING` always yields a
+    row" (CWE-703 / B101) - `assert` statements are silently stripped when
+    Python runs with `-O`, which would turn a should-never-happen case into
+    an actual `AttributeError` on a `None` a few lines later instead of a
+    clear error. Replaced with an explicit `if row is None: raise StoreError`.
+    Full re-scan after the fix: zero findings across 3,190 lines.
+11. **`pip-audit` against exactly what Render deploys - not this dev
+    machine's shared venv.** The first run (against the ambient dev
+    environment) reported 82 "vulnerabilities" - all in packages like
+    `gitpython`, `pypdf`, `soupsieve` that belong to *other, unrelated*
+    projects sharing this machine's Python install, not to this API at all;
+    reporting those as findings would have been wrong. Re-ran properly: a
+    throwaway venv with only `pip install -e ".[api]"` - the exact command
+    `render.yaml`'s `buildCommand` runs - then audited *that*. Zero known
+    vulnerabilities in the real, deployed dependency set (`fastapi` 0.141.1,
+    `psycopg` 3.3.5, `uvicorn` 0.52.4, `starlette` 1.6.0, `pydantic` 2.13.5,
+    and the rest).
+
 **Considered and deliberately not done**: a full rate-limiting middleware
 (e.g. `slowapi` + Redis) for the general endpoint surface. This API has
 exactly one legitimate caller (the frontend, behind the shared `API_KEY`),
@@ -161,3 +193,10 @@ off a single shared secret.
   still comfortably inside Render's limits. If the workbook grows enough to
   push a run past a minute or two on a regular basis, that's the trigger to
   revisit a background-job design, not this finding on its own.
+- `bandit` and `pip-audit` aren't one-off round-5 commands - both are now in
+  the `dev`/`api` extras, `make bandit` / `make audit` / `make security` run
+  them locally, and CI runs both once per push (gated to the 3.12 matrix
+  leg - neither tool's result depends on the Python version). A future
+  dependency bump or new code path that introduces a real finding gets
+  caught automatically, not only when someone remembers to ask for another
+  round of manual testing.

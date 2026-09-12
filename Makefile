@@ -5,7 +5,7 @@
 PY ?= python
 
 .DEFAULT_GOAL := help
-.PHONY: help install lint format format-check typecheck test cov check run api api-dev golden clean
+.PHONY: help install lint format format-check typecheck test cov check run api api-dev golden clean bandit audit security
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -33,6 +33,17 @@ cov:  ## Test suite with an HTML coverage report
 	@echo "open htmlcov/index.html"
 
 check: lint format-check typecheck test  ## Everything CI runs
+
+bandit:  ## Static security scan of src/ (ADR 0011)
+	$(PY) -m bandit -r src/purchase_engine
+
+# Run from a clean env (`pip install -e .[api]` only) - not this machine's
+# shared dev venv, or you'll audit other projects' packages too (ADR 0011).
+# CI's job is clean by construction, no extra care needed there.
+audit:  ## Dependency CVE scan (see the note above - mind your venv)
+	$(PY) -m pip_audit
+
+security: bandit audit  ## Both security checks (ADR 0011)
 
 format-check:  ## Ruff format check (no writes)
 	$(PY) -m ruff format --check src tests

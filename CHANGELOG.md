@@ -53,6 +53,15 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     confirmed connection behaviour under concurrent load directly against
     the live instance: 20 simultaneous reads, then 30 mixed across three
     endpoints, all `200`.
+  - Round 5: added `bandit` (static analysis) and `pip-audit` (dependency
+    CVEs) to the toolchain — `make bandit` / `make audit` / `make security`,
+    and a CI step (gated to one matrix leg). Fixed the one real `bandit`
+    finding: a bare `assert` in `adapters/query.py` guarding an
+    `INSERT ... RETURNING` (stripped under `python -O`) replaced with an
+    explicit `raise StoreError`. `pip-audit` against exactly what Render
+    deploys (`pip install -e ".[api]"` in a throwaway venv, not this
+    machine's shared dev venv, which falsely flagged 82 CVEs in unrelated
+    projects' packages) found zero known vulnerabilities.
 
 ### Added
 
