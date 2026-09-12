@@ -43,6 +43,16 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     0007) reaches any API response; confirmed unicode and embedded markup
     in a buyer note round-trip byte-for-byte and are never executed as HTML
     (this API renders nothing).
+  - Round 4: `/ready` no longer returns the raw database exception text to
+    an unauthenticated caller (OWASP API8:2023) — logged server-side,
+    generic `"database unreachable"` in the response instead. Swept every
+    other error-response site in `api/` for the same pattern; the one other
+    place it looked similar (`POST /runs`'s `PurchaseEngineError` handling)
+    is this codebase's own curated, deliberately user-facing exception
+    vocabulary behind `X-API-Key` auth — reviewed and left as-is. Also
+    confirmed connection behaviour under concurrent load directly against
+    the live instance: 20 simultaneous reads, then 30 mixed across three
+    endpoints, all `200`.
 
 ### Added
 

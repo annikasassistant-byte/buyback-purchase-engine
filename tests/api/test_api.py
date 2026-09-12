@@ -72,6 +72,27 @@ def test_ready_actually_checks_postgres(client):
     assert resp.json() == {"status": "ok", "database": "reachable"}
 
 
+def test_ready_does_not_leak_the_raw_db_exception(client, monkeypatch):
+    """ADR 0011: /ready is unauthenticated by convention (like /health) - a
+    raw driver exception (can include the DB host) has no business in that
+    unauthenticated response just because Postgres is briefly down. The
+    detail belongs in the server log, not the body (OWASP API8:2023)."""
+    import psycopg
+
+    from purchase_engine.api import app as app_module
+
+    def _boom(*args, **kwargs):
+        raise psycopg.OperationalError("connection to server at 10.0.0.5 failed: secret-ish")
+
+    monkeypatch.setattr(app_module.psycopg, "connect", _boom)
+
+    resp = client.get("/ready")
+    assert resp.status_code == 503
+    assert "10.0.0.5" not in resp.text
+    assert "secret-ish" not in resp.text
+    assert resp.json() == {"detail": "database unreachable"}
+
+
 def test_security_headers_present_on_every_response(client):
     """ADR 0011: cheap, unconditional hardening - checked on a 200 and a 404
     to confirm the middleware runs regardless of how the route handler ends."""

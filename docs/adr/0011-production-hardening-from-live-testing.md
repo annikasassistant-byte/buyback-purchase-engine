@@ -10,16 +10,17 @@ Accepted
 
 Once the API was actually deployed to `buyback-purchase-engine-api.onrender.com`,
 it was tested directly against that live instance and its real database -
-not just `TestClient` against an in-process app - across three rounds, each
+not just `TestClient` against an in-process app - across four rounds, each
 confirming the previous round's fixes actually reached production before
 looking for more (`/docs` returning `404`, then the security headers
-appearing, were the tells). Auth, CORS, injection resistance, error
-handling, HTTP-method/case/trailing-slash behaviour, unicode round-tripping,
-a PII check against the response payload, and a full `POST /runs` →
-`allocate` → `actions` round trip - including, in round 3, two **real**
-concurrent `POST /runs` fired at the live URL simultaneously (not mocked)
-to prove the lock added in round 1 actually holds under real network
-timing, not just in a unit test. Eight real findings total, all fixed here.
+appearing, then `/ready` responding, were the tells). Auth, CORS, injection
+resistance, error handling, HTTP-method/case/trailing-slash behaviour,
+unicode round-tripping, a PII check against the response payload, connection
+behaviour under concurrent load, and a full `POST /runs` → `allocate` →
+`actions` round trip - including, in round 3, two **real** concurrent
+`POST /runs` fired at the live URL simultaneously (not mocked) to prove the
+lock added in round 1 actually holds under real network timing, not just in
+a unit test. Nine real findings total, all fixed here.
 
 ## Decision
 
@@ -107,6 +108,29 @@ timing, not just in a unit test. Eight real findings total, all fixed here.
   to confirm.) The `<script>` tag is stored as inert string data - this API
   never renders HTML, so there's nothing here for it to execute against;
   that responsibility sits with whatever eventually displays a note.
+
+**Round 4 - one more real finding, plus a load check:**
+
+8. **`/ready` leaked the raw database exception to an unauthenticated
+   caller.** It's unauthenticated on purpose, same convention as `/health`
+   (readiness probes are conventionally public) - but that's exactly why a
+   raw `psycopg` exception (can include the DB host) had no business in the
+   response body just because Postgres was briefly unreachable. OWASP
+   API8:2023 (Security Misconfiguration) names this pattern directly. Fixed:
+   the detail goes to `log.error` server-side; the client gets a fixed
+   `"database unreachable"` string. Swept every other `HTTPException` raise
+   site in `api/` for the same pattern - the one other place a caught
+   exception's text reaches a response (`POST /runs`'s `PurchaseEngineError`
+   handling) is different in kind, not just degree: those are this
+   codebase's own curated, deliberately user-facing exception classes (see
+   `errors.py`'s own docstring), not a raw driver exception, and that
+   endpoint requires `X-API-Key` - reviewed and left as-is.
+9. **Connection behaviour under concurrent load, checked directly against
+   the live instance** - 20 simultaneous `GET /runs/latest`, then 30 mixed
+   requests across three endpoints (`/recommendations`, `/ready`,
+   `/runs/latest`) at once. All 200s. `DATABASE_URL_POOLED` (PgBouncer) is
+   exactly what this was chosen for in ADR 0009 - confirmed, not just
+   assumed.
 
 **Considered and deliberately not done**: a full rate-limiting middleware
 (e.g. `slowapi` + Redis) for the general endpoint surface. This API has

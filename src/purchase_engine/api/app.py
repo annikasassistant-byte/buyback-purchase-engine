@@ -101,7 +101,15 @@ def create_app() -> FastAPI:
         """Readiness - actually checks Postgres is reachable. Not what
         Render's own restart logic watches (see `/health`); this is for a
         human or the frontend asking "is it the app or the database" during
-        an incident, without spending ~99s finding out via `POST /runs`."""
+        an incident, without spending ~99s finding out via `POST /runs`.
+
+        Unauthenticated on purpose, same as `/health` - readiness probes are
+        conventionally public. That's exactly why the failure detail stays
+        server-side (`log.error`) instead of in the response: the raw
+        driver exception can include the DB host, and there's no reason to
+        hand that to an unauthenticated caller just because Postgres is
+        briefly down (ADR 0011).
+        """
         settings = get_settings()
         try:
             with (
@@ -110,8 +118,9 @@ def create_app() -> FastAPI:
             ):
                 cur.execute("SELECT 1")
         except psycopg.Error as exc:
+            log.error("readiness check: database unreachable: %s", exc)  # noqa: TRY400
             raise HTTPException(
-                status.HTTP_503_SERVICE_UNAVAILABLE, f"database unreachable: {exc}"
+                status.HTTP_503_SERVICE_UNAVAILABLE, "database unreachable"
             ) from exc
         return {"status": "ok", "database": "reachable"}
 
